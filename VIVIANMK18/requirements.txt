@@ -1,0 +1,47 @@
+# VIVIAN Mk18 — Python dependencies (Raspberry Pi 5)
+# System packages also required: ffmpeg, alsa-utils (aplay/amixer), whisper.cpp (built separately)
+
+# Core
+anthropic>=0.62
+pyyaml
+requests
+
+# Audio / voice
+kokoro-onnx>=0.5
+soundfile
+numpy
+scipy
+sounddevice
+pyaudio
+pvporcupine
+torch            # Silero VAD (loaded via torch.hub)
+
+# Spotify
+spotipy
+
+# Hardware / system
+gpiozero
+psutil
+pytz
+
+# GPS / location
+gps
+geopy
+
+# Displays
+pygame
+pillow
+cairosvg         # optional — CRT logo rendering
+spidev           # Spotify touch LCD
+smbus2           # Spotify touch LCD
+
+# Glass HUD / dashboard
+websockets
+flask
+bcrypt
+
+# Sentry (camera security)
+opencv-python
+ultralytics      # YOLOv8
+insightface
+onnxruntime

@@ -1,0 +1,107 @@
+# VIVIAN Configuration File
+# Copy this to config.yaml and fill in your API keys
+
+porcupine:
+  access_key: ""
+  model_path: "Hey-Vivian_en_raspberry-pi_v3_0_0.ppn"
+
+spotify:
+  client_id: ""
+  client_secret: ""
+  refresh_token: ""
+  device_name: "raspotify (PI5)"
+  default_playlist_uri: "spotify:playlist:3b3cb2OH1MgoFb2bzvRT9e"
+
+anthropic:
+  api_key: ""
+  model: "claude-haiku-4-5"
+
+# Local TTS — Piper (binary + voice models downloaded by setup_mk18.sh).
+# Two voice profiles: the assistant speaks as "default" (alba, warm + a light
+# synthetic edge); sentry mode speaks as "sentry" (GLaDOS).
+tts:
+  engine: "piper"           # piper | kokoro
+  piper_bin: "piper/piper"  # native Piper binary (relative to app dir)
+  gain_db: 6.0              # default loudness boost in dB (limiter prevents clipping)
+  profiles:
+    default:                # main assistant — you & known users
+      model: "voices/alba.onnx"
+      effect: "alba"        # eased chorus + echo + subtle ring-mod
+    sentry:                 # sentry mode — threat/deterrent lines
+      model: "voices/glados.onnx"
+      effect: "none"        # GLaDOS character is baked into the model
+
+  # --- Kokoro fallback (used only when engine: kokoro) ---
+  model_path: "models/kokoro-v1.0.onnx"
+  voices_path: "models/voices-v1.0.bin"
+  voice: "af_alloy"
+  speed: 1.0
+  onnx_threads: 3    # Pi 5: 3 is faster than 4 (leaves a core for other threads)
+
+# Timezone (IANA name) used across memory, weather, assistant
+timezone: "US/Eastern"
+
+audio:
+  sample_rate: 48000
+  silence_duration: 0.7
+  max_record_duration: 15.0
+  alsa_device: "vivian_tts"
+  stereo_control: "Stereo"
+
+whisper:
+  binary_path: "/home/cjatkinson/whisper.cpp/build/bin/whisper-cli"
+  model_path: "/home/cjatkinson/whisper.cpp/models/ggml-base.en.bin"
+
+files:
+  state_file: "vivian_state.json"
+  memory_file: "vivian_memory.json"
+  memory_limit: 30
+  log_file: "vivian.log"
+
+hardware:
+  button_pin: 23
+  display_switch_pins:
+    nav: 17
+    weather: 18
+    diagnostics: 27
+    unused: 22
+
+weather:
+  api_key: ""
+  city: "Woodstock"
+  state: "GA"
+  country: "US"
+
+vehicle:
+  make: "Mustang"
+  year: 1969
+  engine: "351 Windsor"
+  transmission: "FMX automatic"
+  rear_end: "3.50 Limited Slip"
+  carburetor: "Autolite 2100"
+
+# GPS Configuration
+gps:
+  enabled: true
+  google_api_key: ""
+
+# Sentry Mode Configuration
+sentry:
+  config_path: "Sentry/sentry_config.yaml"
+  tts_output: "internal_plug"
+
+# Glass HUD Configuration
+glass:
+  enabled: true
+  host: "0.0.0.0"
+  port: 9100
+  control_token: ""   # optional — when set, Glass must send it with commands (sentry/music)
+
+# Remote Dashboard Configuration
+dashboard:
+  enabled: true
+  port: 9200
+  secure_cookie: false  # set true when access is HTTPS-only (Cloudflare Tunnel)
+  username: ""
+  password_hash: ""  # Generate with: python -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())"
+  secret_key: ""     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
