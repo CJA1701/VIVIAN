@@ -157,6 +157,19 @@ try:
             ok(f"{key} present")
         else:
             fail(f"{key} is EMPTY in config.yaml")
+    chime = (cfg.audio or {}).get("listen_chime", "sounds/listen_chime.wav")
+    if not chime:
+        ok("listening chime disabled by config (intentional)")
+    else:
+        cp = Path(chime)
+        if not cp.is_absolute():
+            cp = HERE / cp
+        if cp.exists():
+            ok(f"listening chime present: {cp.name}")
+        else:
+            warn(f"listening chime missing: {cp} — VIVIAN will listen silently "
+                 f"(no cue when the CRT is off and no music is playing)")
+
     glass = cfg.glass or {}
     if glass.get("enabled") and not glass.get("control_token"):
         warn("glass.control_token is empty — anyone on the car's WiFi can arm/"

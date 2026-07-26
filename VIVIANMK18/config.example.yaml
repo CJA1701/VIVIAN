@@ -47,6 +47,11 @@ audio:
   max_record_duration: 15.0
   alsa_device: "vivian_tts"
   stereo_control: "Stereo"
+  # Short chime played the moment VIVIAN starts listening, so there is audible
+  # feedback when the CRT is off and no music is playing to hear pause. Plays on
+  # the TTS output (stereo_direct), which bypasses the stereo mute. Set to ""
+  # to disable. Alternatives live in sounds/ — swap the file or point here.
+  listen_chime: "sounds/listen_chime.wav"
 
 whisper:
   binary_path: "/home/cjatkinson/whisper.cpp/build/bin/whisper-cli"

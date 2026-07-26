@@ -2,6 +2,7 @@ import json
 import logging
 import logging.handlers
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -80,6 +81,11 @@ class VIVIAN:
             stereo_control = self.config.audio.get('stereo_control', 'Stereo')
             # Card is auto-detected based on USB port
             self.audio_mute = AudioMuteController(control_name=stereo_control)
+
+            # Resolve the listening chime once. Defaulted rather than required,
+            # so an existing config.yaml with no `listen_chime` key still gets
+            # the cue; set it to "" to disable.
+            self._listen_chime = self._resolve_listen_chime()
 
             # Initialize TTS
             logger.info("Initializing text-to-speech...")
@@ -284,6 +290,45 @@ class VIVIAN:
             return self.run_sentry_mode
         return None
 
+    def _resolve_listen_chime(self):
+        """Absolute path to the listening chime, or None if disabled/missing."""
+        rel = self.config.audio.get('listen_chime', 'sounds/listen_chime.wav')
+        if not rel:
+            logger.info("Listening chime disabled by config")
+            return None
+        path = Path(rel)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        if not path.exists():
+            logger.warning(
+                f"Listening chime not found: {path} — continuing without it"
+            )
+            return None
+        logger.info(f"Listening chime: {path.name}")
+        return path
+
+    def _play_listen_chime(self):
+        """Play the short 'I'm listening' chime, blocking until it finishes.
+
+        Blocking is deliberate: this must complete BEFORE the mic opens, or the
+        recording captures the chime and Silero VAD can score it as speech. The
+        clip is ~130ms, so the added latency is negligible.
+
+        Goes to the TTS output device (stereo_direct), which bypasses the stereo
+        mute — the same reason spoken replies are audible while music is muted.
+        Any failure is non-fatal: a missing chime must never cost an interaction.
+        """
+        if not self._listen_chime:
+            return
+        try:
+            device = getattr(self.tts, 'output_device', 'stereo_direct')
+            subprocess.run(
+                ["aplay", "-q", "-D", device, str(self._listen_chime)],
+                stderr=subprocess.PIPE, timeout=5,
+            )
+        except Exception as e:
+            logger.debug(f"Listen chime failed ({e}) — continuing")
+
     def _resume_music_async(self):
         """Resume Spotify in the background, after any in-flight pause.
 
@@ -331,6 +376,11 @@ class VIVIAN:
             # Set listening mode — CRT shows LISTENING only after music is paused
             self.hardware.set_listen_mode()
             self._set_assistant_state('listening')
+
+            # Audible "go ahead" — the CRT and the music dropping out are the
+            # only other cues, and neither exists with the CRT off and nothing
+            # playing. Before record() opens the mic, by design.
+            self._play_listen_chime()
 
             # Record audio
             logger.info("Recording user input...")
