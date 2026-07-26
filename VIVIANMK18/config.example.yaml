@@ -50,7 +50,10 @@ audio:
   # Short chime played the moment VIVIAN starts listening, so there is audible
   # feedback when the CRT is off and no music is playing to hear pause. Plays on
   # the TTS output (stereo_direct), which bypasses the stereo mute. Set to ""
-  # to disable. Alternatives live in sounds/ — swap the file or point here.
+  # to disable.
+  # Currently: two-tone rise pitched down 30% (462 -> 693Hz, 172ms).
+  # sounds/ also holds the other auditioned candidates plus the -20%/-40%
+  # pitch brackets — point this at any of them to swap, no re-sync needed.
   listen_chime: "sounds/listen_chime.wav"
 
 whisper:
