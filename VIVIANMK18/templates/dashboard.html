@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIVIAN Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0a;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 20px;
+            background: #111;
+            border-bottom: 1px solid #222;
+            height: 48px;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .header-logo {
+            color: #00ff88;
+            font-size: 18px;
+            font-weight: bold;
+            letter-spacing: 4px;
+        }
+        .header-vehicle {
+            color: #555;
+            font-size: 12px;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        .connection-dot.connected { background: #00ff88; }
+        .logout-btn {
+            color: #666;
+            text-decoration: none;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+        .logout-btn:hover { color: #ff4444; }
+
+        /* Main layout */
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            height: calc(100vh - 48px);
+        }
+
+        /* Map */
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #111;
+        }
+        .leaflet-container { background: #111; }
+
+        /* Sidebar */
+        .sidebar {
+            background: #111;
+            border-left: 1px solid #222;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .panel {
+            background: #161616;
+            border: 1px solid #222;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        .panel-title {
+            font-size: 10px;
+            color: #555;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        /* Speed panel */
+        .speed-display {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .speed-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #00ff88;
+            line-height: 1;
+        }
+        .speed-unit {
+            font-size: 14px;
+            color: #555;
+        }
+        .speed-meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 6px;
+            font-size: 11px;
+            color: #666;
+        }
+
+        /* GPS panel */
+        .gps-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 12px;
+            font-size: 12px;
+        }
+        .gps-label { color: #555; }
+        .gps-value { color: #ccc; text-align: right; }
+        .gps-fix { color: #00ff88; }
+        .gps-nofix { color: #ff4444; }
+
+        /* Spotify panel */
+        .spotify-track {
+            font-size: 13px;
+            color: #e0e0e0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .spotify-artist {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .spotify-bar-bg {
+            height: 3px;
+            background: #2a2a2a;
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .spotify-bar-fill {
+            height: 100%;
+            background: #1db954;
+            border-radius: 2px;
+            transition: width 2s linear;
+        }
+        .spotify-time {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #555;
+            margin-top: 4px;
+        }
+        .spotify-idle {
+            font-size: 12px;
+            color: #444;
+        }
+
+        /* Weather panel */
+        .weather-display {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .weather-temp {
+            font-size: 28px;
+            color: #e0e0e0;
+        }
+        .weather-condition {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* Sentry panel */
+        .sentry-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .sentry-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .sentry-armed { background: #ff4444; animation: pulse 2s infinite; }
+        .sentry-disarmed { background: #333; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Diagnostics panel */
+        .diag-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .diag-row:last-child { margin-bottom: 0; }
+        .diag-label { color: #555; }
+        .diag-value { color: #ccc; }
+        .diag-bar-bg {
+            width: 60px;
+            height: 4px;
+            background: #2a2a2a;
+            border-radius: 2px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        .diag-bar-fill {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+        .diag-bar-ok { background: #00ff88; }
+        .diag-bar-warn { background: #ffaa00; }
+        .diag-bar-crit { background: #ff4444; }
+
+        /* Assistant panel */
+        .assistant-state {
+            font-size: 12px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .assistant-state.active { color: #00ff88; }
+        /* Logs button + modal */
+        .logs-btn {
+            width: 100%;
+            padding: 10px;
+            background: transparent;
+            border: 1px solid #00ff88;
+            border-radius: 4px;
+            color: #00ff88;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            cursor: pointer;
+        }
+        .logs-btn:hover { background: #00ff8822; }
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal-backdrop.open { display: flex; }
+        .modal {
+            background: #0f0f0f;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            width: 100%;
+            max-width: 1100px;
+            margin: auto;
+            display: flex;
+            flex-direction: column;
+            max-height: 90vh;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #222;
+        }
+        .modal-title {
+            color: #00ff88;
+            font-size: 13px;
+            letter-spacing: 3px;
+            font-weight: bold;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 22px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .modal-close:hover { color: #ff4444; }
+        .log-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px 16px 0;
+            border-bottom: 1px solid #222;
+        }
+        .log-tab {
+            background: transparent;
+            border: 1px solid #222;
+            border-bottom: none;
+            color: #666;
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+        }
+        .log-tab.active { color: #00ff88; border-color: #00ff88; background: #0a0a0a; }
+        .log-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            padding-bottom: 6px;
+        }
+        .log-action {
+            background: transparent;
+            border: 1px solid #333;
+            color: #888;
+            padding: 4px 10px;
+            font-family: inherit;
+            font-size: 10px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .log-action:hover { color: #00ff88; border-color: #00ff88; }
+        .log-content {
+            flex: 1;
+            overflow: auto;
+            padding: 12px 16px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #aaa;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #060606;
+        }
+        .sentry-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #060606;
+            padding: 16px;
+            gap: 16px;
+            overflow: auto;
+        }
+        .sentry-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+        .sentry-state {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #aaa;
+        }
+        .sentry-toggle-btn {
+            padding: 10px 20px;
+            background: transparent;
+            border: 1px solid #00ff88;
+            border-radius: 4px;
+            color: #00ff88;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            cursor: pointer;
+        }
+        .sentry-toggle-btn.active {
+            border-color: #ff4444;
+            color: #ff4444;
+        }
+        .sentry-toggle-btn:hover { background: #ffffff10; }
+        .sentry-toggle-btn:disabled { opacity: 0.5; cursor: wait; }
+        .sentry-cam-wrap {
+            position: relative;
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 4px;
+            min-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .sentry-cam-wrap img {
+            max-width: 100%;
+            max-height: 60vh;
+            display: none;
+        }
+        .sentry-cam-wrap img.live { display: block; }
+        .sentry-cam-placeholder {
+            color: #555;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+
+        /* Mobile / narrow screens */
+        @media (max-width: 768px) {
+            body { overflow: auto; height: auto; min-height: 100vh; }
+            .header { padding: 10px 14px; }
+            .header-vehicle { display: none; }
+            .header-logo { font-size: 16px; letter-spacing: 3px; }
+            .main {
+                grid-template-columns: 1fr;
+                grid-template-rows: 45vh auto;
+                height: auto;
+            }
+            #map { height: 45vh; min-height: 280px; }
+            .sidebar {
+                border-left: none;
+                border-top: 1px solid #222;
+                overflow-y: visible;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                padding: 10px;
+            }
+            .panel { padding: 10px; }
+            .speed-value { font-size: 38px; }
+            .weather-temp { font-size: 24px; }
+            /* Full-width panels */
+            .sidebar .panel:nth-child(3),
+            .sidebar .panel:nth-child(7) {
+                grid-column: 1 / -1;
+            }
+        }
+        @media (max-width: 420px) {
+            .sidebar { grid-template-columns: 1fr; }
+            .sidebar .panel:nth-child(n) { grid-column: auto; }
+            #map { height: 40vh; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <span class="header-logo">VIVIAN</span>
+            <span class="header-vehicle">1969 Ford Mustang 351W</span>
+        </div>
+        <div class="header-right">
+            <span class="connection-dot" id="connDot"></span>
+            <a href="/logout" class="logout-btn">LOGOUT</a>
+        </div>
+    </div>
+
+    <div class="main">
+        <div id="map"></div>
+
+        <div class="sidebar">
+            <!-- Speed -->
+            <div class="panel">
+                <div class="panel-title">Speed</div>
+                <div class="speed-display">
+                    <span class="speed-value" id="speedVal">--</span>
+                    <span class="speed-unit">MPH</span>
+                </div>
+                <div class="speed-meta">
+                    <span>HDG <span id="headingVal">--</span>&deg;</span>
+                    <span>ALT <span id="altVal">--</span> ft</span>
+                </div>
+            </div>
+
+            <!-- GPS -->
+            <div class="panel">
+                <div class="panel-title">GPS</div>
+                <div class="gps-grid">
+                    <span class="gps-label">Status</span>
+                    <span class="gps-value" id="gpsFix">--</span>
+                    <span class="gps-label">Satellites</span>
+                    <span class="gps-value" id="gpsSats">--</span>
+                    <span class="gps-label">Latitude</span>
+                    <span class="gps-value" id="gpsLat">--</span>
+                    <span class="gps-label">Longitude</span>
+                    <span class="gps-value" id="gpsLon">--</span>
+                </div>
+            </div>
+
+            <!-- Spotify -->
+            <div class="panel">
+                <div class="panel-title">Music</div>
+                <div id="spotifyContent">
+                    <div class="spotify-idle">Not playing</div>
+                </div>
+            </div>
+
+            <!-- Weather -->
+            <div class="panel">
+                <div class="panel-title">Weather</div>
+                <div class="weather-display">
+                    <span class="weather-temp" id="weatherTemp">--</span>
+                    <span class="weather-condition" id="weatherCond">--</span>
+                </div>
+            </div>
+
+            <!-- Sentry -->
+            <div class="panel">
+                <div class="panel-title">Sentry</div>
+                <div class="sentry-status">
+                    <div class="sentry-dot sentry-disarmed" id="sentryDot"></div>
+                    <span id="sentryText">Disarmed</span>
+                </div>
+            </div>
+
+            <!-- Diagnostics -->
+            <div class="panel">
+                <div class="panel-title">System</div>
+                <div>
+                    <div class="diag-row">
+                        <span class="diag-label">CPU Temp</span>
+                        <span class="diag-value" id="diagTemp">--</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">CPU Load</span>
+                        <span class="diag-value"><span id="diagCpu">--</span>%
+                            <span class="diag-bar-bg"><span class="diag-bar-fill diag-bar-ok" id="diagCpuBar" style="width:0%"></span></span>
+                        </span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">RAM</span>
+                        <span class="diag-value"><span id="diagRam">--</span>
+                            <span class="diag-bar-bg"><span class="diag-bar-fill diag-bar-ok" id="diagRamBar" style="width:0%"></span></span>
+                        </span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Disk</span>
+                        <span class="diag-value"><span id="diagDisk">--</span>
+                            <span class="diag-bar-bg"><span class="diag-bar-fill diag-bar-ok" id="diagDiskBar" style="width:0%"></span></span>
+                        </span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Uptime</span>
+                        <span class="diag-value" id="diagUptime">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs -->
+            <div class="panel">
+                <div class="panel-title">Console</div>
+                <button class="logs-btn" id="logsBtn">OPEN CONSOLE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs modal -->
+    <div class="modal-backdrop" id="logsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">VIVIAN CONSOLE</span>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="log-tabs">
+                <button class="log-tab active" data-tab="vivian">INTERACTION</button>
+                <button class="log-tab" data-tab="system">SYSTEM</button>
+                <button class="log-tab" data-tab="sentry">SENTRY</button>
+                <div class="log-actions">
+                    <button class="log-action" id="logRefresh">REFRESH</button>
+                </div>
+            </div>
+            <pre class="log-content" id="logContent">Loading...</pre>
+            <div class="sentry-pane" id="sentryPane" style="display:none;">
+                <div class="sentry-controls">
+                    <div class="sentry-state">
+                        <div class="sentry-dot sentry-disarmed" id="sentryModalDot"></div>
+                        <span id="sentryModalText">Disarmed</span>
+                    </div>
+                    <button class="sentry-toggle-btn" id="sentryToggleBtn">ENABLE SENTRY</button>
+                </div>
+                <div class="sentry-last-event" id="sentryLastEvent" style="color:#999;font-size:12px;margin:6px 0;"></div>
+                <div class="sentry-cam-wrap">
+                    <img id="sentryCam" alt="Sentry feed" />
+                    <div class="sentry-cam-placeholder" id="sentryCamPlaceholder">Connecting to camera…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Map setup
+        const map = L.map('map', {
+            center: [34.0, -84.5],
+            zoom: 14,
+            zoomControl: true,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OSM',
+            maxZoom: 19,
+        }).addTo(map);
+
+        const marker = L.circleMarker([34.0, -84.5], {
+            radius: 8,
+            color: '#00ff88',
+            fillColor: '#00ff88',
+            fillOpacity: 0.8,
+            weight: 2,
+        }).addTo(map);
+
+        let hasInitialPosition = false;
+
+        // SSE connection
+        let evtSource = null;
+        function connect() {
+            evtSource = new EventSource('/api/state');
+            document.getElementById('connDot').classList.add('connected');
+
+            evtSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateGps(data.gps);
+                updateSpotify(data.spotify);
+                updateWeather(data.weather);
+                updateSentry(data.sentry_active);
+                updateSentryStatus(data.sentry_status);
+                updateDiagnostics(data.diagnostics);
+            };
+
+            evtSource.onerror = function() {
+                document.getElementById('connDot').classList.remove('connected');
+                evtSource.close();
+                setTimeout(connect, 3000);
+            };
+        }
+        connect();
+
+        // Update functions
+        function updateGps(gps) {
+            if (!gps) return;
+
+            const speedEl = document.getElementById('speedVal');
+            const headingEl = document.getElementById('headingVal');
+            const altEl = document.getElementById('altVal');
+            const fixEl = document.getElementById('gpsFix');
+            const satsEl = document.getElementById('gpsSats');
+            const latEl = document.getElementById('gpsLat');
+            const lonEl = document.getElementById('gpsLon');
+
+            speedEl.textContent = gps.speed_mph !== null ? Math.round(gps.speed_mph) : '--';
+            headingEl.textContent = gps.track !== null ? Math.round(gps.track) : '--';
+            altEl.textContent = gps.alt !== null ? Math.round(gps.alt * 3.281) : '--';
+
+            if (gps.has_fix) {
+                fixEl.textContent = '3D Fix';
+                fixEl.className = 'gps-value gps-fix';
+            } else {
+                fixEl.textContent = 'No Fix';
+                fixEl.className = 'gps-value gps-nofix';
+            }
+            satsEl.textContent = gps.sats_used || '--';
+            latEl.textContent = gps.lat !== null ? gps.lat.toFixed(5) : '--';
+            lonEl.textContent = gps.lon !== null ? gps.lon.toFixed(5) : '--';
+
+            // Update map marker
+            if (gps.lat !== null && gps.lon !== null) {
+                const latlng = [gps.lat, gps.lon];
+                marker.setLatLng(latlng);
+                if (!hasInitialPosition) {
+                    map.setView(latlng, 15);
+                    hasInitialPosition = true;
+                } else {
+                    map.panTo(latlng);
+                }
+            }
+        }
+
+        function updateSpotify(spotify) {
+            const container = document.getElementById('spotifyContent');
+            if (!spotify || !spotify.is_playing) {
+                container.innerHTML = '<div class="spotify-idle">Not playing</div>';
+                return;
+            }
+            const progress = spotify.progress_ms || 0;
+            const duration = spotify.duration_ms || 1;
+            const pct = Math.min((progress / duration) * 100, 100);
+            const fmt = ms => {
+                const s = Math.floor(ms / 1000);
+                return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+            };
+            container.innerHTML = `
+                <div class="spotify-track">${escHtml(spotify.track)}</div>
+                <div class="spotify-artist">${escHtml(spotify.artist)}</div>
+                <div class="spotify-bar-bg"><div class="spotify-bar-fill" style="width:${pct}%"></div></div>
+                <div class="spotify-time"><span>${fmt(progress)}</span><span>${fmt(duration)}</span></div>
+            `;
+        }
+
+        function updateWeather(weather) {
+            if (!weather) return;
+            document.getElementById('weatherTemp').textContent = weather.temp_f ? weather.temp_f + '\u00B0F' : '--';
+            document.getElementById('weatherCond').textContent = weather.condition || '--';
+        }
+
+        function updateSentry(active) {
+            const dot = document.getElementById('sentryDot');
+            const text = document.getElementById('sentryText');
+            if (active) {
+                dot.className = 'sentry-dot sentry-armed';
+                text.textContent = 'Armed';
+                text.style.color = '#ff4444';
+            } else {
+                dot.className = 'sentry-dot sentry-disarmed';
+                text.textContent = 'Disarmed';
+                text.style.color = '#888';
+            }
+            sentryActive = !!active;
+            updateSentryModalUI();
+        }
+
+        function updateSentryStatus(status) {
+            const el = document.getElementById('sentryLastEvent');
+            if (!el) return;
+            if (!status) { el.textContent = ''; return; }
+            let line = 'Last event';
+            if (status.time_str) line += ' ' + status.time_str;
+            line += ': ';
+            if (status.level !== null && status.level !== undefined) {
+                line += 'level ' + status.level;
+                if (status.description) line += ' — ' + status.description;
+                el.style.color = status.level >= 7 ? '#ff6666'
+                               : status.level >= 4 ? '#ffaa44' : '#88cc88';
+            } else {
+                line += status.event || 'monitoring';
+                el.style.color = '#88cc88';
+            }
+            el.textContent = line;
+        }
+
+        function updateDiagnostics(diag) {
+            if (!diag) return;
+            const tempEl = document.getElementById('diagTemp');
+            const cpuEl = document.getElementById('diagCpu');
+            const cpuBar = document.getElementById('diagCpuBar');
+            const ramEl = document.getElementById('diagRam');
+            const ramBar = document.getElementById('diagRamBar');
+            const diskEl = document.getElementById('diagDisk');
+            const diskBar = document.getElementById('diagDiskBar');
+            const uptimeEl = document.getElementById('diagUptime');
+
+            tempEl.textContent = diag.cpu_temp_c !== null ? diag.cpu_temp_c + '\u00B0C' : '--';
+
+            cpuEl.textContent = diag.cpu_percent !== undefined ? diag.cpu_percent : '--';
+            setBar(cpuBar, diag.cpu_percent || 0);
+
+            ramEl.textContent = diag.ram_percent !== undefined ? diag.ram_percent + '%' : '--';
+            setBar(ramBar, diag.ram_percent || 0);
+
+            diskEl.textContent = diag.disk_percent !== undefined ? diag.disk_percent + '%' : '--';
+            setBar(diskBar, diag.disk_percent || 0);
+
+            if (diag.uptime_seconds !== undefined) {
+                const h = Math.floor(diag.uptime_seconds / 3600);
+                const m = Math.floor((diag.uptime_seconds % 3600) / 60);
+                uptimeEl.textContent = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+            }
+        }
+
+        function setBar(el, pct) {
+            el.style.width = pct + '%';
+            el.className = 'diag-bar-fill ' + (pct > 85 ? 'diag-bar-crit' : pct > 65 ? 'diag-bar-warn' : 'diag-bar-ok');
+        }
+
+        // Console modal (logs + sentry)
+        const logsModal = document.getElementById('logsModal');
+        const logContent = document.getElementById('logContent');
+        const sentryPane = document.getElementById('sentryPane');
+        const sentryCam = document.getElementById('sentryCam');
+        const sentryCamPlaceholder = document.getElementById('sentryCamPlaceholder');
+        const sentryToggleBtn = document.getElementById('sentryToggleBtn');
+        const sentryModalDot = document.getElementById('sentryModalDot');
+        const sentryModalText = document.getElementById('sentryModalText');
+        let currentTab = 'vivian';
+        let sentryFrameTimer = null;
+        let sentryActive = false;
+
+        function loadLogs(kind) {
+            logContent.textContent = 'Loading...';
+            fetch('/api/logs?kind=' + kind + '&lines=300')
+                .then(r => r.json())
+                .then(d => {
+                    logContent.textContent = d.text || '(empty)';
+                    logContent.scrollTop = logContent.scrollHeight;
+                })
+                .catch(e => { logContent.textContent = 'Error: ' + e; });
+        }
+
+        function startSentryFrames() {
+            stopSentryFrames();
+            const tick = () => {
+                sentryCam.onload = () => {
+                    sentryCam.classList.add('live');
+                    sentryCamPlaceholder.style.display = 'none';
+                };
+                sentryCam.onerror = () => {
+                    sentryCam.classList.remove('live');
+                    sentryCamPlaceholder.style.display = 'block';
+                    sentryCamPlaceholder.textContent = 'Camera unavailable';
+                };
+                sentryCam.src = '/sentry/frame.jpg?t=' + Date.now();
+            };
+            tick();
+            sentryFrameTimer = setInterval(tick, 200);
+        }
+        function stopSentryFrames() {
+            if (sentryFrameTimer) { clearInterval(sentryFrameTimer); sentryFrameTimer = null; }
+            sentryCam.classList.remove('live');
+            sentryCam.removeAttribute('src');
+        }
+
+        function updateSentryModalUI() {
+            if (sentryActive) {
+                sentryModalDot.className = 'sentry-dot sentry-armed';
+                sentryModalText.textContent = 'Armed';
+                sentryModalText.style.color = '#ff4444';
+                sentryToggleBtn.textContent = 'DISABLE SENTRY';
+                sentryToggleBtn.classList.add('active');
+            } else {
+                sentryModalDot.className = 'sentry-dot sentry-disarmed';
+                sentryModalText.textContent = 'Disarmed';
+                sentryModalText.style.color = '#888';
+                sentryToggleBtn.textContent = 'ENABLE SENTRY';
+                sentryToggleBtn.classList.remove('active');
+            }
+        }
+
+        sentryToggleBtn.addEventListener('click', () => {
+            sentryToggleBtn.disabled = true;
+            fetch('/api/sentry/toggle', { method: 'POST' })
+                .then(r => r.json())
+                .then(() => {
+                    setTimeout(() => { sentryToggleBtn.disabled = false; }, 1500);
+                })
+                .catch(() => { sentryToggleBtn.disabled = false; });
+        });
+
+        function showTab(name) {
+            currentTab = name;
+            document.querySelectorAll('.log-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === name);
+            });
+            if (name === 'sentry') {
+                logContent.style.display = 'none';
+                sentryPane.style.display = 'flex';
+                startSentryFrames();
+            } else {
+                sentryPane.style.display = 'none';
+                logContent.style.display = 'block';
+                stopSentryFrames();
+                loadLogs(name);
+            }
+        }
+
+        document.getElementById('logsBtn').addEventListener('click', () => {
+            logsModal.classList.add('open');
+            showTab(currentTab);
+        });
+        document.getElementById('modalClose').addEventListener('click', () => {
+            logsModal.classList.remove('open');
+            stopSentryFrames();
+        });
+        logsModal.addEventListener('click', (e) => {
+            if (e.target === logsModal) {
+                logsModal.classList.remove('open');
+                stopSentryFrames();
+            }
+        });
+        document.getElementById('logRefresh').addEventListener('click', () => {
+            if (currentTab === 'sentry') startSentryFrames();
+            else loadLogs(currentTab);
+        });
+        document.querySelectorAll('.log-tab').forEach(tab => {
+            tab.addEventListener('click', () => showTab(tab.dataset.tab));
+        });
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+    </script>
+</body>
+</html>
