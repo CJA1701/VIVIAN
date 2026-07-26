@@ -146,7 +146,11 @@ class GPSController:
                         # Calculate speed from position deltas as fallback
                         # (VK-162 reports speed as 0 even when moving)
                         if lat is not None and lon is not None and abs(lat) > 0.01:
-                            now = time.time()
+                            # monotonic: this Pi has no RTC battery, so NTP steps
+                            # the wall clock at every boot. A forward step
+                            # inflated dt while still passing the 0.2-5.0s gate
+                            # (silently under-reporting speed).
+                            now = time.monotonic()
                             if self._prev_lat is not None and self._prev_time is not None:
                                 dt = now - self._prev_time
                                 if 0.2 < dt < 5.0:
@@ -171,9 +175,13 @@ class GPSController:
                         self._satellites_used = sum(1 for s in sats if s.get('used', False))
 
                 # Write to shared file periodically (every 0.25s)
-                if time.time() - self._last_file_write >= 0.25:
+                # monotonic: a BACKWARD clock step made this difference
+                # negative, so the shared file stopped being written until the
+                # wall clock caught up — the CRT and Glass froze their speed and
+                # position for the rest of the drive, with nothing logged.
+                if time.monotonic() - self._last_file_write >= 0.25:
                     self._write_shared_file()
-                    self._last_file_write = time.time()
+                    self._last_file_write = time.monotonic()
 
             except StopIteration:
                 # gpsd closed the session (restart, USB re-enumeration, ...)
@@ -716,12 +724,12 @@ class GPSController:
         Returns:
             True if fix acquired, False if timeout
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         logger.info("Waiting for GPS fix...")
         
-        while time.time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             if self.has_fix():
-                logger.info(f"GPS fix acquired after {time.time() - start_time:.1f} seconds")
+                logger.info(f"GPS fix acquired after {time.monotonic() - start_time:.1f} seconds")
                 return True
             time.sleep(0.5)
         

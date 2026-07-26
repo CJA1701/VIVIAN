@@ -1,5 +1,6 @@
 import spotipy
 import requests
+import inspect
 import threading
 import time
 import json
@@ -10,6 +11,38 @@ import logging
 logger = logging.getLogger(__name__)
 
 SPOTIFY_SHARED_FILE = "/tmp/vivian_spotify.json"
+
+# Timeout/retry overrides we want on every client. requests_timeout is the
+# important one — the driver is waiting on these calls — and it has existed for
+# many spotipy releases. `retries` only exists in spotipy >= 2.13.
+_CLIENT_TUNING = {'requests_timeout': 3, 'retries': 0}
+_CLIENT_TUNING_SUPPORTED = None
+
+
+def _client_tuning_kwargs() -> Dict:
+    """Return only the tuning kwargs this installed spotipy actually accepts.
+
+    requirements.txt is unpinned, and passing an unsupported kwarg raises
+    TypeError at construction — which would break ALL music control. Losing a
+    single override is far better than that, so probe the signature once and
+    warn loudly about anything we had to drop.
+    """
+    global _CLIENT_TUNING_SUPPORTED
+    if _CLIENT_TUNING_SUPPORTED is None:
+        try:
+            params = inspect.signature(spotipy.Spotify.__init__).parameters
+            supported = {k: v for k, v in _CLIENT_TUNING.items() if k in params}
+        except (TypeError, ValueError):
+            supported = {}
+        dropped = sorted(set(_CLIENT_TUNING) - set(supported))
+        if dropped:
+            logger.warning(
+                f"Installed spotipy does not accept {dropped}; using its "
+                f"defaults for those. Upgrade spotipy (>= 2.13) so Spotify "
+                f"calls on the wake-word path stay bounded."
+            )
+        _CLIENT_TUNING_SUPPORTED = supported
+    return _CLIENT_TUNING_SUPPORTED
 
 
 class SpotifyController:
@@ -162,11 +195,8 @@ class SpotifyController:
         """
         local = self._client_local
         if getattr(local, 'gen', None) != self._token_gen:
-            local.client = spotipy.Spotify(
-                auth=self.access_token,
-                requests_timeout=3,
-                retries=0,
-            )
+            local.client = spotipy.Spotify(auth=self.access_token,
+                                           **_client_tuning_kwargs())
             local.gen = self._token_gen
         return local.client
 
@@ -229,13 +259,25 @@ class SpotifyController:
             return None
     
     def save_state(self, should_resume: bool):
-        """Save music resume state"""
+        """Save music resume state.
+
+        Atomic (tmp + os.replace), like the other state writers here. A plain
+        truncating write could be caught mid-flight by ignition-off, and
+        load_state() defaults a corrupt file to True — so a pause you asked for
+        came back as music playing on the next drive.
+        """
+        tmp_path = f"{self.state_file}.tmp"
         try:
-            with open(self.state_file, 'w') as f:
+            with open(tmp_path, 'w') as f:
                 json.dump({"music_should_resume": should_resume}, f)
+            os.replace(tmp_path, self.state_file)
             logger.debug(f"State saved: should_resume={should_resume}")
         except IOError as e:
             logger.error(f"Error saving state: {e}")
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
     
     def load_state(self) -> bool:
         """Load music resume state"""

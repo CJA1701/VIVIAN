@@ -145,6 +145,9 @@ class SentryConfig:
     snapshot_dir: str = 'snapshots'
     snapshot_known_retention_days: int = 30
     snapshot_unknown_retention_days: int = 30
+    # Hard ceiling per snapshot dir, oldest deleted first. Age-based retention
+    # cannot bound a busy night, and a full SD card breaks the sentry silently.
+    snapshot_max_files: int = 400
 
     # Logging
     log_dir: str = 'logs'
@@ -277,6 +280,7 @@ class SentryConfig:
             snapshot_dir=snap.get('directory', 'snapshots'),
             snapshot_known_retention_days=snap.get('known_retention_days', 30),
             snapshot_unknown_retention_days=snap.get('unknown_retention_days', 30),
+            snapshot_max_files=snap.get('max_files', 400),
 
             log_dir=log.get('directory', 'logs'),
             log_max_bytes=log.get('max_bytes', 10 * 1024 * 1024),
@@ -1068,8 +1072,17 @@ class SnapshotManager:
         else:
             filename = self.unknown_dir / f"detection_{timestamp}_{person_count}p.jpg"
 
-        cv2.imwrite(str(filename), frame)
-        self.logger.info(f"Snapshot saved: {filename}")
+        # Check the return value: on a full SD card imwrite fails silently, and
+        # the caller then hands a non-existent path to the threat analyzer, whose
+        # encode step raises and is swallowed into a bogus level-5 "analysis
+        # unavailable". A loud log here is the difference between "disk is full"
+        # and "the AI is broken".
+        if not cv2.imwrite(str(filename), frame):
+            self.logger.error(
+                f"Snapshot write FAILED (disk full or unwritable?): {filename}"
+            )
+        else:
+            self.logger.info(f"Snapshot saved: {filename}")
         return filename
 
     def cleanup_old_snapshots(self):
@@ -1084,6 +1097,36 @@ class SnapshotManager:
         # Legacy flat snapshots
         legacy_cutoff = now - timedelta(days=self.config.snapshot_unknown_retention_days)
         self._cleanup_directory(self.snapshot_dir, legacy_cutoff, recursive=False)
+
+        # Age-based retention alone cannot bound disk usage: a night of repeated
+        # triggers writes hundreds of JPEGs that are all well inside the
+        # retention window. Recordings are capped by file count; snapshots were
+        # not, so a full SD card silently broke snapshotting AND threat analysis
+        # (a missing file makes _encode_image_base64 raise, which the analyzer
+        # swallows into a bogus level-5 "analysis unavailable").
+        self._enforce_count_cap(self.unknown_dir, recursive=False)
+        self._enforce_count_cap(self.known_dir, recursive=True)
+
+    def _enforce_count_cap(self, directory: Path, recursive: bool = False):
+        """Delete oldest-first so a directory never exceeds the file cap."""
+        cap = self.config.snapshot_max_files
+        if cap <= 0 or not directory.exists():
+            return
+        pattern = '**/*.jpg' if recursive else '*.jpg'
+        try:
+            images = sorted(
+                (p for p in directory.glob(pattern) if p.is_file()),
+                key=lambda p: p.stat().st_mtime
+            )
+            excess = len(images) - cap
+            for old in images[:excess] if excess > 0 else []:
+                old.unlink()
+            if excess > 0:
+                self.logger.info(
+                    f"Snapshot cap ({cap}): deleted {excess} oldest from {directory}"
+                )
+        except Exception as e:
+            self.logger.error(f"Snapshot cap enforcement failed for {directory}: {e}")
 
     def _cleanup_directory(self, directory: Path, cutoff: datetime, recursive: bool = False):
         if not directory.exists():
@@ -2274,9 +2317,12 @@ class VehicleSentry:
                 new_track_ids
             )
 
-    def periodic_maintenance(self):
+    def periodic_maintenance(self, force: bool = False):
+        """Hourly cleanup. Pass force=True at startup: the hourly gate meant a
+        sentry run shorter than an hour never cleaned up at all, so disk use
+        only ever grew on typical arm/disarm cycles."""
         now = datetime.now()
-        if (now - self.last_cleanup).total_seconds() > 3600:
+        if force or (now - self.last_cleanup).total_seconds() > 3600:
             self.snapshot_manager.cleanup_old_snapshots()
             self.person_detector.cleanup_old_tracks()
             self.last_cleanup = now
@@ -2295,6 +2341,13 @@ class VehicleSentry:
         """Main detection loop"""
         self._setup_signal_handlers()
         self.logger.info("Starting Vehicle Sentry System Mk3 (with AI Threat Analysis)...")
+
+        # Reclaim disk before arming, not an hour in — most runs are shorter
+        # than the hourly maintenance gate, so cleanup never used to happen.
+        try:
+            self.periodic_maintenance(force=True)
+        except Exception as e:
+            self.logger.error(f"Startup maintenance failed: {e}")
 
         if self.watchdog.initialize_camera() is None:
             self.logger.error("Failed to initialize camera - exiting")

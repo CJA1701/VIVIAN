@@ -364,6 +364,15 @@ class _IntegratedSentry:
         sentry._setup_signal_handlers()
         sentry.logger.info("Starting Vehicle Sentry System Mk3 (with AI Threat Analysis)...")
 
+        # Reclaim disk before arming. This wrapper replaces VehicleSentry.run(),
+        # so it needs its own startup maintenance call — and since most runs are
+        # shorter than the hourly gate, without it cleanup never happened at all
+        # on the integrated (in-car) path.
+        try:
+            sentry.periodic_maintenance(force=True)
+        except Exception as e:
+            sentry.logger.error(f"Startup maintenance failed: {e}")
+
         if sentry.watchdog.initialize_camera() is None:
             sentry.logger.error("Failed to initialize camera - exiting")
             return

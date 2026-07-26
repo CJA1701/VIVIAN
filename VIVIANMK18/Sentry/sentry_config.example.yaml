@@ -84,6 +84,8 @@ snapshots:
   directory: "snapshots"
   known_retention_days: 30
   unknown_retention_days: 30
+  max_files: 400          # hard cap per dir (oldest deleted first) so a
+                          # busy night cannot fill the SD card
 
 # Logging
 logging:
