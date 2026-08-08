@@ -55,6 +55,25 @@ CALLBACK_TIMEOUT_S = 300.0
 # (same deaf-forever symptom, nothing in the log but repeated errors).
 MAX_OPEN_FAILURES = 8    # consecutive failures before exiting for a clean restart
 
+# --- Porcupine licence/activation failures -----------------------------------
+# These are NOT audio faults and a restart cannot fix them: Picovoice's
+# activation server refused the AccessKey. They must never feed the escalation
+# ladder above, or VIVIAN restart-loops every ~20s and TTS, the displays and
+# sentry never stabilise. Instead: log something actionable, back off, and keep
+# retrying slowly so she self-heals the moment the key is valid again — with
+# the rest of the system running normally in the meantime.
+LICENCE_RETRY_S = 60.0
+try:
+    _LICENCE_ERRORS = (
+        pvporcupine.PorcupineActivationError,
+        pvporcupine.PorcupineActivationLimitError,
+        pvporcupine.PorcupineActivationRefusedError,
+        pvporcupine.PorcupineActivationThrottledError,
+        pvporcupine.PorcupineKeyError,
+    )
+except AttributeError:      # older pvporcupine without the typed exceptions
+    _LICENCE_ERRORS = ()
+
 
 class _AudioStall(Exception):
     """Raised internally when the input stream delivers dead/frozen audio."""
@@ -245,6 +264,7 @@ class WakeWordDetector:
         self.running = True
         recoveries = 0  # consecutive stall recoveries with no good audio in between
         open_failures = 0  # consecutive setup/read errors with no good audio in between
+        licence_failures = 0  # consecutive Porcupine activation refusals
 
         logger.info("Starting wake word detection loop")
 
@@ -339,6 +359,7 @@ class WakeWordDetector:
                         self._last_good_frame = now_m
                         recoveries = 0  # healthy audio — clear recovery streak
                         open_failures = 0
+                        licence_failures = 0
 
                     # Resample to Porcupine's expected rate
                     pcm_target = self._resample_int16_mono(pcm_dev, from_sr=device_sr, to_sr=target_sr)
@@ -441,6 +462,23 @@ class WakeWordDetector:
                 # process looked healthy. Rotate the input device and escalate.
                 self._cleanup_audio(stream, pa, porcupine)
                 stream = pa = porcupine = None
+
+                # Licence/activation refusal: restarting and rotating devices
+                # are both pointless. Back off and keep the rest of VIVIAN alive.
+                if _LICENCE_ERRORS and isinstance(e, _LICENCE_ERRORS):
+                    licence_failures += 1
+                    if licence_failures == 1 or licence_failures % 20 == 0:
+                        logger.error(
+                            f"Porcupine ACTIVATION REFUSED ({type(e).__name__}) "
+                            f"— this is an AccessKey/licence problem, NOT audio. "
+                            f"Check console.picovoice.ai (device limit / key "
+                            f"validity). Wake word is offline; button, Glass and "
+                            f"sentry still work. Retrying every "
+                            f"{LICENCE_RETRY_S:.0f}s (attempt {licence_failures})."
+                        )
+                    time.sleep(LICENCE_RETRY_S)
+                    continue
+
                 open_failures += 1
                 self._device_attempt += 1
                 if open_failures >= MAX_OPEN_FAILURES:

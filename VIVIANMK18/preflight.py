@@ -200,13 +200,22 @@ try:
             f"playback PCM '{pcm}' {'found' if pcm in names else 'MISSING (check /etc/asound.conf)'}")
 except Exception as e:
     warn(f"aplay -L failed: {e}")
+# Capture is checked through PortAudio, NOT `arecord -L`. arecord omits custom
+# capture PCMs that have no hint block (vivian_mic is one), which produced a
+# false FAIL while the device was perfectly usable. audio.py and wake_word.py
+# both find the mic by substring-matching PortAudio's device names, so ask the
+# exact question they ask. Enumeration does not open a stream, so this is safe
+# to run while the service holds the device.
 try:
-    r = subprocess.run(["arecord", "-L"], capture_output=True, timeout=10)
-    names = (r.stdout or b"").decode(errors="replace")
-    (ok if "vivian_mic" in names else fail)(
-        f"capture PCM 'vivian_mic' {'found' if 'vivian_mic' in names else 'MISSING'}")
+    import sounddevice as _sd
+    _inputs = [d["name"] for d in _sd.query_devices() if d["max_input_channels"] > 0]
+    if any("vivian_mic" in n for n in _inputs):
+        ok("capture device 'vivian_mic' visible to PortAudio")
+    else:
+        fail(f"capture device 'vivian_mic' NOT visible to PortAudio — "
+             f"inputs seen: {', '.join(_inputs[:6])}")
 except Exception as e:
-    warn(f"arecord -L failed: {e}")
+    warn(f"PortAudio capture enumeration failed: {e}")
 
 
 # ---------------------------------------------------------------- whisper
