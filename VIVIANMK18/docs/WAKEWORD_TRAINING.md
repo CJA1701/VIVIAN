@@ -59,6 +59,34 @@ hard-negative mining, and exports a single `.onnx` with the sigmoid baked in.
 
 `hey_vivian.onnx` **auto-downloads to your browser's download folder** at the end.
 
+### Bench results for the model in `models/hey_vivian.onnx`
+
+Validated against macOS `say` voices (7 voices, deliberately NOT the Piper
+voices it was trained on) with 0.5s lead-in and 1.2s trailing silence:
+
+| clip type | n | median score | min |
+|---|---|---|---|
+| "Hey Vivian" | 7 | 0.971 | 0.518 |
+| "Hey Vivien" | 7 | 0.936 | 0.162 |
+| "Hey Vivian turn on the radio" | 7 | 0.734 | 0.143 |
+| negatives (Hey Google/Siri/Brian, "Vivian" alone, ...) | 56 | 0.000 | max 0.091 |
+
+90% recall at zero false accepts. Specificity is the strong part — every
+negative scored ~0, including other "Hey X" phrases.
+
+Two things this tells you:
+
+- **Pad your test clips.** openWakeWord scores a sliding 1.28s window, so a clip
+  that ends the instant the phrase does never completes a window and scores near
+  zero. That is a measurement artifact, not a bad model — it cost me a wrong
+  conclusion the first time.
+- **Pause after the wake phrase.** Running straight on ("Hey Vivian turn on the
+  radio") scores materially lower than a clean "Hey Vivian". VIVIAN's flow wants
+  a pause anyway: say it, wait for the chime, then talk.
+
+This is clean synthetic speech, so treat it as proof the model is not a dud —
+NOT as evidence it works in the car. That still needs step 4.
+
 ---
 
 ## 2. Install on the Pi
