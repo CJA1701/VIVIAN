@@ -79,6 +79,101 @@ class _AudioStall(Exception):
     """Raised internally when the input stream delivers dead/frozen audio."""
 
 
+class WakeEngineUnavailable(Exception):
+    """The configured wake engine cannot run at all (missing model/package).
+
+    Distinct from a transient failure: retrying is pointless, so the loop
+    stops trying and leaves button/Glass/sentry working.
+    """
+
+
+# --- Wake engines -------------------------------------------------------------
+# Everything else in this file — the callback deadline, device rotation, the
+# liveness watchdog, USB reset — is engine-agnostic. An engine only has to say
+# what audio it wants and answer "was that the wake word?", so swapping the
+# detector never touches the reliability machinery.
+
+class _WakeEngine:
+    sample_rate = 16000
+    frame_length = 512
+    name = "base"
+
+    def process(self, frame) -> bool:
+        raise NotImplementedError
+
+    def delete(self):
+        pass
+
+
+class _PorcupineEngine(_WakeEngine):
+    """Picovoice Porcupine. Requires a valid AccessKey activated against
+    Picovoice's servers — see _LICENCE_ERRORS for the refusal path."""
+
+    name = "porcupine"
+
+    def __init__(self, access_key, model_path, sensitivity):
+        self._h = pvporcupine.create(
+            access_key=access_key,
+            keyword_paths=[model_path],
+            sensitivities=[sensitivity],
+        )
+        self.sample_rate = self._h.sample_rate
+        self.frame_length = self._h.frame_length
+
+    def process(self, frame) -> bool:
+        return self._h.process(frame.tolist()) >= 0
+
+    def delete(self):
+        try:
+            self._h.delete()
+        except Exception as e:
+            logger.warning(f"Error deleting Porcupine instance: {e}")
+
+
+class _OpenWakeWordEngine(_WakeEngine):
+    """openWakeWord (Apache-2.0, ONNX). No account, no activation server —
+    the reason we can leave Picovoice behind.
+
+    Wants 1280-sample (80ms) int16 frames at 16kHz, and returns a per-model
+    score rather than an index, so the threshold lives here.
+    """
+
+    name = "openwakeword"
+    sample_rate = 16000
+    frame_length = 1280
+
+    def __init__(self, model_path, threshold):
+        try:
+            from openwakeword.model import Model
+        except ImportError as e:
+            raise WakeEngineUnavailable(
+                f"openwakeword is not installed ({e}). "
+                f"Install it on the Pi: pip3 install openwakeword"
+            )
+        if not os.path.exists(model_path):
+            raise WakeEngineUnavailable(
+                f"openWakeWord model not found: {model_path} — train one "
+                f"(see docs/WAKEWORD_TRAINING.md) or point wake_word.model_path at it"
+            )
+        self._threshold = threshold
+        self._model = Model(wakeword_models=[model_path],
+                            inference_framework="onnx")
+        self._key = None
+
+    def process(self, frame) -> bool:
+        scores = self._model.predict(frame)
+        if self._key is None:
+            # The score dict is keyed by model name; resolve it once so a
+            # renamed model file doesn't silently never trigger.
+            self._key = next(iter(scores), None)
+        if self._key is None:
+            return False
+        return scores[self._key] >= self._threshold
+
+    def delete(self):
+        self._model = None
+
+
 class WakeWordDetector:
     """Detect wake word using Porcupine or button press"""
 
@@ -117,9 +212,43 @@ class WakeWordDetector:
         # the process, so the deadline doesn't kill it.
         self._cb_exempt = threading.Event()
 
+        # Engine selection. Porcupine is no longer usable on this build (the
+        # Picovoice account was deleted and there is no free tier), so the
+        # engine is configurable and "none" is a first-class option that keeps
+        # the button/Glass/sentry paths working without log noise.
+        wcfg = getattr(config, 'wake_word', None) or {}
+        self.engine_name = str(wcfg.get('engine', 'porcupine')).lower()
+        self.oww_model_path = wcfg.get('model_path', 'models/hey_vivian.onnx')
+        try:
+            self.oww_threshold = float(wcfg.get('threshold', 0.5))
+        except (TypeError, ValueError):
+            self.oww_threshold = 0.5
+
         logger.info(
-            f"Wake word detector initialized (sensitivity={self.sensitivity})"
+            f"Wake word detector initialized "
+            f"(engine={self.engine_name}, sensitivity={self.sensitivity})"
         )
+
+    def _make_engine(self):
+        """Build the configured wake engine.
+
+        Raises WakeEngineUnavailable when the engine can never work as
+        configured (missing package/model) — the loop treats that as fatal for
+        wake detection but harmless to the rest of VIVIAN.
+        """
+        if self.engine_name in ('none', 'off', 'disabled'):
+            raise WakeEngineUnavailable("wake_word.engine is set to 'none'")
+
+        if self.engine_name == 'openwakeword':
+            path = self.oww_model_path
+            if not os.path.isabs(path):
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+            return _OpenWakeWordEngine(path, self.oww_threshold)
+
+        if self.engine_name == 'porcupine':
+            return _PorcupineEngine(self.access_key, self.model_path, self.sensitivity)
+
+        raise WakeEngineUnavailable(f"unknown wake_word.engine '{self.engine_name}'")
 
     def _usb_reset_mics(self):
         """
@@ -285,16 +414,15 @@ class WakeWordDetector:
 
             try:
                 # Create Porcupine instance
-                porcupine = pvporcupine.create(
-                    access_key=self.access_key,
-                    keyword_paths=[self.model_path],
-                    sensitivities=[self.sensitivity],
-                )
-                
+                porcupine = self._make_engine()
+
                 target_sr = porcupine.sample_rate
                 target_frame = porcupine.frame_length
-                
-                logger.info(f"Porcupine initialized (target SR: {target_sr}Hz, frame length: {target_frame})")
+
+                logger.info(
+                    f"Wake engine '{porcupine.name}' ready "
+                    f"(target SR: {target_sr}Hz, frame length: {target_frame})"
+                )
                 
                 # Initialize PyAudio
                 pa = pyaudio.PyAudio()
@@ -372,7 +500,7 @@ class WakeWordDetector:
                         resampled_buf = resampled_buf[target_frame:]
                         
                         # Check for wake word
-                        wake_detected = porcupine.process(frame.tolist()) >= 0
+                        wake_detected = porcupine.process(frame)
                         
                         # Check for button press
                         button_pressed = self.hardware.is_button_pressed()
@@ -420,6 +548,20 @@ class WakeWordDetector:
                             time.sleep(0.5)
                             raise StopIteration
             
+            except WakeEngineUnavailable as e:
+                # Nothing to retry: the package or model is absent, or the
+                # engine is switched off. Say so once and stop the loop —
+                # button, Glass and sentry all keep working. (Porcupine's
+                # licence refusal is different: that one CAN self-heal, so it
+                # keeps retrying below.)
+                self._cleanup_audio(stream, pa, porcupine)
+                logger.error(
+                    f"Wake word DISABLED — {e}. Button, Glass and sentry are "
+                    f"unaffected; no further attempts will be made."
+                )
+                self.running = False
+                return
+
             except StopIteration:
                 # Clean restart of wake word detection
                 continue

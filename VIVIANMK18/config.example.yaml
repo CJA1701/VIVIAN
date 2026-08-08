@@ -56,6 +56,17 @@ audio:
   # pitch brackets — point this at any of them to swap, no re-sync needed.
   listen_chime: "sounds/listen_chime.wav"
 
+# Wake word engine. Porcupine is dead on this build — the Picovoice account was
+# deleted and there is no longer a free tier — so openWakeWord (Apache-2.0,
+# ONNX, no account, no activation server) is the path forward.
+#   porcupine    - legacy, needs a valid Picovoice AccessKey
+#   openwakeword - custom "Hey VIVIAN" model, see docs/WAKEWORD_TRAINING.md
+#   none         - disable wake detection cleanly (button/Glass/sentry still work)
+wake_word:
+  engine: "none"
+  model_path: "models/hey_vivian.onnx"
+  threshold: 0.5        # tune with tools/eval_wakeword.py — do not guess
+
 whisper:
   binary_path: "/home/cjatkinson/whisper.cpp/build/bin/whisper-cli"
   model_path: "/home/cjatkinson/whisper.cpp/models/ggml-base.en.bin"

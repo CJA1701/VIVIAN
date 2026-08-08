@@ -94,6 +94,59 @@ except Exception as e:
 
 
 # ---------------------------------------------------------------- sudoers
+section("Wake word engine")
+try:
+    from config import Config
+    _cfg = Config("config.yaml")
+    _w = getattr(_cfg, "wake_word", None) or {}
+    _engine = str(_w.get("engine", "porcupine")).lower()
+    if _engine in ("none", "off", "disabled"):
+        warn("wake_word.engine is 'none' — no hands-free wake word; "
+             "button, Glass and sentry still work. "
+             "See docs/WAKEWORD_TRAINING.md to train a 'Hey VIVIAN' model.")
+    elif _engine == "openwakeword":
+        try:
+            import openwakeword  # noqa: F401
+            ok("openwakeword installed")
+            # The shared feature models are fetched on first use; the car is
+            # often offline at boot, so they must already be on disk.
+            import openwakeword as _oww
+            _base = Path(_oww.__file__).parent / "resources" / "models"
+            _have = list(_base.glob("*.onnx")) if _base.exists() else []
+            if _have:
+                ok(f"openWakeWord base feature models present ({len(_have)} files)")
+            else:
+                fail("openWakeWord base models NOT downloaded — a cold boot with "
+                     "no signal would fail. Run: python3 -c "
+                     "'import openwakeword.utils as u; u.download_models()'")
+        except ImportError:
+            fail("wake_word.engine is 'openwakeword' but the package is not "
+                 "installed — run: pip3 install openwakeword")
+        _mp = Path(_w.get("model_path", "models/hey_vivian.onnx"))
+        if not _mp.is_absolute():
+            _mp = HERE / _mp
+        (ok if _mp.exists() else fail)(
+            f"wake model {_mp.name} {'present' if _mp.exists() else 'MISSING — see docs/WAKEWORD_TRAINING.md'}")
+        try:
+            _th = float(_w.get("threshold", 0.5))
+            if 0.2 <= _th <= 0.95:
+                ok(f"threshold {_th} in a sane range")
+            else:
+                warn(f"threshold {_th} is outside 0.2-0.95 — tune with "
+                     f"tools/eval_wakeword.py")
+        except (TypeError, ValueError):
+            fail(f"wake_word.threshold is not a number: {_w.get('threshold')!r}")
+    elif _engine == "porcupine":
+        warn("wake_word.engine is 'porcupine' — the Picovoice account for this "
+             "build was deleted and has no free tier, so activation will be "
+             "refused. See docs/WAKEWORD_TRAINING.md.")
+    else:
+        fail(f"unknown wake_word.engine {_engine!r} "
+             f"(expected porcupine | openwakeword | none)")
+except Exception as e:
+    warn(f"wake engine check skipped: {e}")
+
+
 section("sudoers (init_audio.sh runs unprivileged and needs these)")
 for desc, cmd in [
     ("usbreset (mic dongle recovery)", ["sudo", "-n", "/usr/bin/usbreset", "--help"]),

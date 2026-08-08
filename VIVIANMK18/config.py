@@ -123,6 +123,15 @@ class Config:
     def porcupine(self) -> Dict[str, Any]:
         """Porcupine wake word configuration"""
         return self._config['porcupine']
+
+    @property
+    def wake_word(self) -> Dict[str, Any]:
+        """Wake engine selection (engine / model_path / threshold).
+
+        Optional so an older config.yaml keeps working: absent means the
+        legacy Porcupine path, which is what those installs already used.
+        """
+        return self._config.get('wake_word', {}) or {}
     
     @property
     def spotify(self) -> Dict[str, Any]:
