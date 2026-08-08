@@ -24,21 +24,40 @@ self-contained ~250-line PyTorch trainer that does the same curriculum.
 ⚠️ It is third-party code that downloads several GB of datasets into your Colab
 session. Skim cell 14 before running it — it is deliberately short enough to read.
 
-**Settings — change two lines:**
+**Open it directly in Colab:**
+
+<https://colab.research.google.com/github/alfiedennen/openwakeword-colab-2026/blob/main/train_wakeword.ipynb>
+
+**Runtime → Change runtime type:** GPU (L4 if you have Pro, else T4) **+ High RAM**.
+
+**Edit two lines in Cell 10** — note `TARGET_PHRASE` is a *list* of pronunciation
+variants, all of which map to the same single output:
 
 ```python
-target_phrase = "hey vivian"     # lowercase; how it is pronounced, not spelled
-model_name    = "hey_vivian"     # -> hey_vivian.onnx
+TARGET_PHRASE = ['hey vivian', 'hey vivien']   # two common pronunciations
+MODEL_NAME    = 'hey_vivian'                   # -> hey_vivian.onnx
 ```
 
-**Runtime:** Colab Pro (L4 + High RAM) ≈ 75-90 min. Free tier (T4) works but
-takes ≈2.5 h and may disconnect — if you're on free tier, keep the tab active.
+Keep the variant list short and close together. Two near-identical
+pronunciations improve robustness; throwing in genuinely different words
+(`viviana`, `vivi`) blurs the decision boundary and makes it worse.
+
+Then **Runtime → Run all** and leave it.
+
+- **Cell 4** is a fast dependency preflight (~60 s) — if it fails, stop there;
+  you have not yet burned the long downloads.
+- **~25 GB** of FMA + ACAV100M features download *into the Colab session*, not
+  onto your Mac. Your local free space is irrelevant here.
+- No HuggingFace token, no Google Drive mount needed.
+- **L4 + High RAM ≈ 75-90 min. Free T4 ≈ 2.5 h**, and free Colab disconnects if
+  the tab is backgrounded — keep it visible, and stop the Mac sleeping:
+  `caffeinate -dims` in a terminal for the duration.
 
 What it does: synthesises positives with Piper TTS across many voices, pulls
 negatives from FMA + ACAV100M, augments with noise/reverb, trains with
 hard-negative mining, and exports a single `.onnx` with the sigmoid baked in.
 
-**Download `hey_vivian.onnx` when it finishes.**
+`hey_vivian.onnx` **auto-downloads to your browser's download folder** at the end.
 
 ---
 
