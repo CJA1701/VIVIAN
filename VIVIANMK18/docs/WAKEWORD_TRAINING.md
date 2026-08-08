@@ -179,3 +179,49 @@ Rules of thumb:
   sentry all keep working, and nothing spams the log.
 - If the model file or the package is missing, VIVIAN logs one actionable error
   and carries on with the button — she never crash-loops over it.
+
+---
+
+## Troubleshooting: "she hears nothing" (read this first)
+
+Before suspecting the model or the threshold, confirm **which dongle the mic is
+actually on**. This cost a long debugging session once.
+
+There are two identical GeneralPlus dongles (`1b3f:2008`, no serial numbers):
+
+| USB port | ALSA card | what it is |
+|---|---|---|
+| `1-1.1` | `Device_1` | **microphone** + car-stereo out |
+| `1-2`   | `Device`   | internal speakers; **mic jack empty** |
+
+The empty one has AGC enabled, so it winds its gain up hunting for signal and
+emits loud, pulsing, hissy noise. It is **louder than the real microphone**, so
+"which card has more signal" is exactly the wrong test — it picks the dead one.
+
+Tell them apart by **crest factor**, not level:
+
+```bash
+sudo systemctl stop vivian     # frees the mic
+arecord -D plughw:1,0 -f S16_LE -r 48000 -c 1 -d 10 /tmp/t.wav   # then tap the mic
+```
+
+- real mic: crest ≈ 60x, per-second variation ≈ 60x, <1% energy above 8kHz
+- empty input: crest ≈ 1.5x, variation ≈ 2x, ~14% energy above 8kHz
+
+Two more traps:
+
+- **Record at 48000, not 16000.** The hardware only supports 44100/48000; asking
+  ALSA's `plug` layer for 16k makes it resample, and the result sounds like
+  digital crackling. Every diagnostic capture at 16k is misleading.
+- **Just listen to it.** `scp` the wav over and play it. Thirty seconds of
+  listening beat an hour of my spectral analysis at identifying "this is not a
+  microphone".
+
+`system/85-vivian-audio.rules` pins both dongles to fixed card names by physical
+USB port so the mapping cannot flip between boots. Install with:
+
+```bash
+sudo cp system/85-vivian-audio.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules      # takes effect at next boot
+cat /sys/class/sound/card*/id            # verify: Device, Device_1, Camera
+```

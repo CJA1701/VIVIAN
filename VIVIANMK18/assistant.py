@@ -121,13 +121,27 @@ class Assistant:
             },
             {
                 "name": "play_track",
-                "description": "Play a specific song on Spotify",
+                "description": (
+                    "Play a specific song on Spotify. ALWAYS call this with your "
+                    "best interpretation of what the user asked for — never ask "
+                    "them to clarify a song title. Spotify's search is fuzzy and "
+                    "resolves partial, misheard or approximate titles; a wrong "
+                    "guess is trivially corrected by the driver, whereas a "
+                    "clarifying question while they are driving is useless. "
+                    "The request reached you via speech-to-text, so titles are "
+                    "often mangled — especially numbers, which arrive split or "
+                    "hyphenated ('in the year 25-25' is the song 'In the Year "
+                    "2525'). Join split digits and pass the plausible real title."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "track_name": {
                             "type": "string",
-                            "description": "Name of the track to play"
+                            "description": (
+                                "Name of the track, normalised to the most likely "
+                                "real title (join split digits: '25-25' -> '2525')"
+                            )
                         },
                         "artist_name": {
                             "type": "string",
@@ -646,9 +660,27 @@ class Assistant:
             return
 
         if name == "play_track":
+            track_name = args["track_name"]
+            artist_name = args.get("artist_name", "")
             track_info = self.spotify.play_track(
-                args["track_name"], args.get("artist_name", ""), start_immediately=False
+                track_name, artist_name, start_immediately=False
             )
+            if not track_info:
+                # Speech-to-text splits numbers in titles ("in the year 25-25"
+                # for "In the Year 2525"), which Spotify's search will not
+                # resolve. Retry once with the digits rejoined before giving up.
+                retry = re.sub(r"(?<=\d)[\s-]+(?=\d)", "", track_name)
+                if retry != track_name:
+                    logger.info(f"Track not found, retrying with joined digits: "
+                                f"'{track_name}' -> '{retry}'")
+                    track_info = self.spotify.play_track(
+                        retry, artist_name, start_immediately=False
+                    )
+            if not track_info:
+                # Say so rather than failing silently — the driver otherwise has
+                # no idea whether she heard them at all.
+                self.tts.speak(f"I couldn't find {track_name} on Spotify.")
+                return
             if track_info:
                 announcement = f"Playing {track_info['name']} by {track_info['artists']}."
                 self.memory.add_interaction(user_prompt, announcement)

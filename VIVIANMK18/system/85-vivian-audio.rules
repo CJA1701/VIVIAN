@@ -1,0 +1,19 @@
+# Pin the two identical GeneralPlus USB audio dongles to fixed ALSA card names
+# by PHYSICAL USB PORT.
+#
+# Both dongles are 1b3f:2008 with no serial number, so ALSA names them by
+# enumeration order: whichever appears first becomes "Device", the second
+# "Device_1". That order is not guaranteed across boots, and when it flips,
+# vivian_mic silently points at the dongle with nothing in its mic jack —
+# which, with AGC enabled, emits loud plausible-looking noise that no watchdog
+# can distinguish from a live microphone. VIVIAN then looks perfectly healthy
+# and is completely deaf. This pins the names to the ports so it cannot happen.
+#
+#   USB 1-1.1 = mic + car-stereo dongle  -> Device_1  (asound.conf: vivian_mic, stereo_*)
+#   USB 1-2   = internal-speaker dongle  -> Device    (asound.conf: internal_*)
+#
+# Names deliberately match the existing ones so /etc/asound.conf and
+# init_audio.sh need no changes. Verify after a boot with:
+#   cat /sys/class/sound/card*/id
+SUBSYSTEM=="sound", KERNELS=="1-1.1", ACTION=="add", ATTR{id}="Device_1"
+SUBSYSTEM=="sound", KERNELS=="1-2",   ACTION=="add", ATTR{id}="Device"

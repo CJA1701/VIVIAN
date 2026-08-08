@@ -63,6 +63,9 @@ MAX_OPEN_FAILURES = 8    # consecutive failures before exiting for a clean resta
 # retrying slowly so she self-heals the moment the key is valid again — with
 # the rest of the system running normally in the meantime.
 LICENCE_RETRY_S = 60.0
+
+# How often to log the peak wake score when wake_word.debug_scores is on.
+DEBUG_SCORE_INTERVAL_S = 2.0
 try:
     _LICENCE_ERRORS = (
         pvporcupine.PorcupineActivationError,
@@ -142,7 +145,7 @@ class _OpenWakeWordEngine(_WakeEngine):
     sample_rate = 16000
     frame_length = 1280
 
-    def __init__(self, model_path, threshold):
+    def __init__(self, model_path, threshold, debug_scores=False):
         try:
             from openwakeword.model import Model
         except ImportError as e:
@@ -150,6 +153,15 @@ class _OpenWakeWordEngine(_WakeEngine):
                 f"openwakeword is not installed ({e}). "
                 f"Install it on the Pi: pip3 install openwakeword"
             )
+        # When on, log the peak score every DEBUG_SCORE_INTERVAL_S. This is the
+        # only way to see what the live mic actually produces without stopping
+        # the service to record — a silent wake word is otherwise
+        # indistinguishable from "model never fires" and "audio never arrives".
+        self._debug = debug_scores
+        self._peak = 0.0
+        self._peak_at = time.monotonic()
+        self._lvl = 0.0
+        self._nframes = 0
         if not os.path.exists(model_path):
             raise WakeEngineUnavailable(
                 f"openWakeWord model not found: {model_path} — train one "
@@ -168,7 +180,29 @@ class _OpenWakeWordEngine(_WakeEngine):
             self._key = next(iter(scores), None)
         if self._key is None:
             return False
-        return scores[self._key] >= self._threshold
+        score = scores[self._key]
+
+        if self._debug:
+            self._peak = max(self._peak, score)
+            # Track the audio level of the SAME frames the model sees. A near
+            # silent level means audio never arrives (routing/device problem);
+            # a healthy level with a zero score means the model is the problem.
+            lvl = float(np.abs(frame).max()) / 32768.0
+            self._lvl = max(getattr(self, "_lvl", 0.0), lvl)
+            now = time.monotonic()
+            if now - self._peak_at >= DEBUG_SCORE_INTERVAL_S:
+                logger.info(
+                    f"wake score peak={self._peak:.3f} "
+                    f"(threshold {self._threshold:.2f}) | audio peak={self._lvl:.4f} "
+                    f"| frames={self._nframes}"
+                )
+                self._peak = 0.0
+                self._lvl = 0.0
+                self._nframes = 0
+                self._peak_at = now
+            self._nframes = getattr(self, "_nframes", 0) + 1
+
+        return score >= self._threshold
 
     def delete(self):
         self._model = None
@@ -223,6 +257,12 @@ class WakeWordDetector:
             self.oww_threshold = float(wcfg.get('threshold', 0.5))
         except (TypeError, ValueError):
             self.oww_threshold = 0.5
+        self.oww_debug = bool(wcfg.get('debug_scores', False))
+        # Only ever open the named vivian_mic PCM. Default ON: the udev rule
+        # pins each dongle to a fixed ALSA card by physical USB port, so
+        # vivian_mic is always the real microphone and falling back to another
+        # input device can only ever make things worse (see _get_input_device).
+        self.strict_device = bool(wcfg.get('strict_device', True))
 
         logger.info(
             f"Wake word detector initialized "
@@ -243,7 +283,8 @@ class WakeWordDetector:
             path = self.oww_model_path
             if not os.path.isabs(path):
                 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
-            return _OpenWakeWordEngine(path, self.oww_threshold)
+            return _OpenWakeWordEngine(path, self.oww_threshold,
+                                       debug_scores=self.oww_debug)
 
         if self.engine_name == 'porcupine':
             return _PorcupineEngine(self.access_key, self.model_path, self.sensitivity)
@@ -643,9 +684,18 @@ class WakeWordDetector:
 
         Candidate order: the named `vivian_mic` PCM first, then every other
         input-capable device (the second identical USB dongle, raw hw, etc.).
-        `self._device_attempt` advances on each audio stall so a wedged or
-        enumeration-swapped dongle gets bypassed for the other one without
-        needing a udev pin.
+        `self._device_attempt` advances on each audio stall so a wedged
+        dongle gets bypassed.
+
+        With strict_device set (the default now that udev pins the cards by
+        physical USB port), ONLY vivian_mic is ever used. Rotation existed to
+        survive the two identical dongles swapping enumeration order, which the
+        udev pin solves properly — and rotating was actively dangerous: the
+        spare dongle has nothing plugged into its mic jack, and its AGC winds
+        the gain up until the floating input produces loud, plausible-looking
+        noise. No watchdog can tell that apart from a live mic, so a rotation
+        onto it left VIVIAN permanently deaf while looking perfectly healthy.
+        That is exactly the failure that cost a long debugging session.
         """
         named = []   # vivian_mic by name (preferred)
         others = []  # any other input-capable device
@@ -658,7 +708,17 @@ class WakeWordDetector:
             else:
                 others.append((i, info.get('name')))
 
-        candidates = named + others
+        if self.strict_device:
+            if not named:
+                raise RuntimeError(
+                    "strict_device is set but no input device named 'vivian_mic' "
+                    "exists — check /etc/asound.conf and that the mic dongle is "
+                    "plugged in. Refusing to fall back to an arbitrary device."
+                )
+            candidates = named
+        else:
+            candidates = named + others
+
         if not candidates:
             raise RuntimeError("No input device found with input channels")
 

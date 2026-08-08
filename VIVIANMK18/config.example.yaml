@@ -66,6 +66,11 @@ wake_word:
   engine: "none"
   model_path: "models/hey_vivian.onnx"
   threshold: 0.5        # tune with tools/eval_wakeword.py — do not guess
+  # Only ever open the named vivian_mic PCM. udev pins each dongle to a fixed
+  # ALSA card by USB port, so vivian_mic is always the real microphone; falling
+  # back to another input device can only land on the spare dongle, whose empty
+  # mic jack emits AGC-amplified noise indistinguishable from live audio.
+  strict_device: true
 
 whisper:
   binary_path: "/home/cjatkinson/whisper.cpp/build/bin/whisper-cli"
