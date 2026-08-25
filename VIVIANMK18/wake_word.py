@@ -145,7 +145,8 @@ class _OpenWakeWordEngine(_WakeEngine):
     sample_rate = 16000
     frame_length = 1280
 
-    def __init__(self, model_path, threshold, debug_scores=False):
+    def __init__(self, model_path, threshold, debug_scores=False,
+                 vad_threshold=0.5, patience=1):
         try:
             from openwakeword.model import Model
         except ImportError as e:
@@ -168,12 +169,35 @@ class _OpenWakeWordEngine(_WakeEngine):
                 f"(see docs/WAKEWORD_TRAINING.md) or point wake_word.model_path at it"
             )
         self._threshold = threshold
+        # vad_threshold gates activations on Silero VAD: unless actual speech is
+        # present, the score is suppressed. This is aimed squarely at music —
+        # a song that happens to resemble the wake word cannot fire when the VAD
+        # says nobody is talking.
+        # patience requires N consecutive 80ms frames above threshold. MEASURED
+        # AND REJECTED for this model: openWakeWord emits a single-frame SPIKE,
+        # not a sustained plateau, so patience=2 detected 0/12 real utterances
+        # (patience=1 detected 11/12). Left configurable, but anything above 1
+        # will make the wake word stop working. Do not raise it without
+        # re-measuring against real clips.
+        self._patience = max(1, int(patience))
         self._model = Model(wakeword_models=[model_path],
-                            inference_framework="onnx")
+                            inference_framework="onnx",
+                            vad_threshold=vad_threshold)
         self._key = None
+        logger.info(f"openWakeWord gating: threshold={threshold} "
+                    f"patience={self._patience} vad_threshold={vad_threshold}")
 
     def process(self, frame) -> bool:
-        scores = self._model.predict(frame)
+        if self._key is not None and self._patience > 1:
+            # patience REQUIRES an explicit threshold dict; predict() zeroes the
+            # returned score unless N consecutive frames cleared it.
+            scores = self._model.predict(
+                frame,
+                patience={self._key: self._patience},
+                threshold={self._key: self._threshold},
+            )
+        else:
+            scores = self._model.predict(frame)
         if self._key is None:
             # The score dict is keyed by model name; resolve it once so a
             # renamed model file doesn't silently never trigger.
@@ -182,8 +206,20 @@ class _OpenWakeWordEngine(_WakeEngine):
             return False
         score = scores[self._key]
 
+        # Raw (ungated) score for diagnostics. The returned score is 0 whenever
+        # patience/VAD suppressed it, so logging that instead would hide the
+        # very numbers needed to tune the threshold.
+        try:
+            raw = float(list(self._model.prediction_buffer[self._key])[-1])
+        except (KeyError, IndexError):
+            raw = score
+
+        if score >= self._threshold:
+            logger.info(f"WAKE TRIGGER raw_score={raw:.3f} "
+                        f"(threshold {self._threshold:.2f}, patience {self._patience})")
+
         if self._debug:
-            self._peak = max(self._peak, score)
+            self._peak = max(self._peak, raw)
             # Track the audio level of the SAME frames the model sees. A near
             # silent level means audio never arrives (routing/device problem);
             # a healthy level with a zero score means the model is the problem.
@@ -263,6 +299,14 @@ class WakeWordDetector:
         # vivian_mic is always the real microphone and falling back to another
         # input device can only ever make things worse (see _get_input_device).
         self.strict_device = bool(wcfg.get('strict_device', True))
+        try:
+            self.oww_vad = float(wcfg.get('vad_threshold', 0.5))
+        except (TypeError, ValueError):
+            self.oww_vad = 0.5
+        try:
+            self.oww_patience = int(wcfg.get('patience', 1))
+        except (TypeError, ValueError):
+            self.oww_patience = 1
 
         logger.info(
             f"Wake word detector initialized "
@@ -284,7 +328,9 @@ class WakeWordDetector:
             if not os.path.isabs(path):
                 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
             return _OpenWakeWordEngine(path, self.oww_threshold,
-                                       debug_scores=self.oww_debug)
+                                       debug_scores=self.oww_debug,
+                                       vad_threshold=self.oww_vad,
+                                       patience=self.oww_patience)
 
         if self.engine_name == 'porcupine':
             return _PorcupineEngine(self.access_key, self.model_path, self.sensitivity)
@@ -423,12 +469,17 @@ class WakeWordDetector:
         y = np.interp(xo, xp, x)
         return np.clip(y, -32768, 32767).astype(np.int16)
     
-    def listen(self, on_wake_callback, poll_callback=None):
+    def listen(self, on_wake_callback, poll_callback=None, on_detect_callback=None):
         """
         Listen for wake word or button press.
         Calls on_wake_callback when either is detected.
         If poll_callback is set, calls it each audio frame — if it returns True,
         triggers the same cleanup/restart cycle as a wake event.
+
+        on_detect_callback fires the INSTANT a wake word is detected, before
+        stream teardown and the settle delay. That path costs ~0.5s, during
+        which the car stereo is still playing and bleeding into the recording
+        that is about to start. Keep whatever runs here very short.
         """
         FIXED_DEVICE_SR = 48000
         self.running = True
@@ -557,6 +608,16 @@ class WakeWordDetector:
                             else:
                                 trigger_type = "Button Press"
                             logger.info(f"[{trigger_type} Detected]")
+
+                            # Kill the audio bleed FIRST. Teardown plus the
+                            # settle sleep below take ~0.5s, and every
+                            # millisecond of that is music playing into the mic
+                            # and muddying "is she listening yet?".
+                            if on_detect_callback is not None:
+                                try:
+                                    on_detect_callback()
+                                except Exception as e:
+                                    logger.warning(f"on_detect callback failed: {e}")
 
                             # Disarm: the callback (GPT + TTS) can run far
                             # longer than LIVENESS_TIMEOUT_S with no reads.

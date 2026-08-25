@@ -307,6 +307,20 @@ class VIVIAN:
         logger.info(f"Listening chime: {path.name}")
         return path
 
+    def _mute_on_detect(self):
+        """Silence the car stereo the moment the wake word fires.
+
+        Spotify's API pause takes 1-2s to take effect, so the ALSA mute is what
+        actually stops the sound — and it has to happen before stream teardown
+        and the settle delay, or music keeps playing into the recording and it
+        is unclear when to start talking. Cheap (~50ms amixer call) and
+        idempotent; run_assistant_interaction calls mute() again harmlessly.
+        """
+        try:
+            self.audio_mute.mute()
+        except Exception as e:
+            logger.warning(f"Could not mute on wake detection: {e}")
+
     def _play_listen_chime(self):
         """Play the short 'I'm listening' chime, blocking until it finishes.
 
@@ -559,7 +573,8 @@ class VIVIAN:
             # poll_callback checks for Glass sentry requests each audio frame
             self.wake_detector.listen(
                 on_wake_callback=self.run_assistant_interaction,
-                poll_callback=self._check_sentry_request
+                poll_callback=self._check_sentry_request,
+                on_detect_callback=self._mute_on_detect
             )
             
         except KeyboardInterrupt:

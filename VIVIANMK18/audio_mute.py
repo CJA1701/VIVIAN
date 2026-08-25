@@ -5,6 +5,11 @@ Mutes/unmutes the car stereo output while keeping Spotify playing
 import subprocess
 import logging
 import os
+import re
+
+# asound.conf declares the 'Stereo' softvol on this card, and udev pins the
+# name to a fixed USB port. Names are stable; card numbers are not.
+STEREO_CARD_NAME = "Device_1"
 
 logger = logging.getLogger(__name__)
 
@@ -31,35 +36,67 @@ class AudioMuteController:
         logger.info(f"Audio mute controller initialized (control: {control_name}, card: {self.card})")
 
     def _detect_stereo_card(self):
-        """Detect which card is the stereo based on USB port"""
+        """Resolve which ALSA card carries the softvol control named by
+        `control_name` (the car-stereo output).
+
+        Returns a card NAME, not a number. asound.conf declares the control on
+        `card Device_1`, and udev pins that name to a physical USB port, so the
+        name is the stable identifier — card numbers are enumeration order.
+
+        This used to scan /proc/asound/cards for the literal string
+        'usb-xhci-hcd.1-1'. The real string is 'usb-xhci-hcd.0-1.1', so it never
+        matched and silently fell back to card 0 — which has its own unrelated
+        softvol control of the same name. amixer therefore SUCCEEDED, mute()
+        logged "Stereo muted", and the music kept playing: the wrong control was
+        being turned down. Music only stopped when the Spotify API pause landed
+        a second or two later, which is exactly the bug this fixes.
+        """
+        # 1. Cache written by vivian-audio-detect.service, when it works.
         try:
-            # Try to read from detection script output
             if os.path.exists('/tmp/vivian_stereo_card'):
-                with open('/tmp/vivian_stereo_card', 'r') as f:
+                with open('/tmp/vivian_stereo_card') as f:
                     card = f.read().strip()
-                    if card:
-                        logger.info(f"Detected stereo card from cache: {card}")
-                        return card
+                if card and self._control_exists(card):
+                    logger.info(f"Stereo card from cache: {card}")
+                    return card
+        except OSError:
+            pass
 
-            # Fall back to detecting from /proc/asound/cards
-            with open('/proc/asound/cards', 'r') as f:
-                lines = f.readlines()
-                for i, line in enumerate(lines):
-                    # Look for USB port 3-1 (stereo)
-                    if 'usb-xhci-hcd.1-1' in line:
-                        # Previous line has card number
-                        if i > 0:
-                            card_num = lines[i-1].strip().split()[0]
-                            logger.info(f"Detected stereo card from USB port: {card_num}")
-                            return card_num
+        # 2. The expected name, verified by actually probing for the control.
+        if self._control_exists(STEREO_CARD_NAME):
+            logger.info(f"Stereo card: {STEREO_CARD_NAME}")
+            return STEREO_CARD_NAME
 
-            # Default fallback
-            logger.warning("Could not detect stereo card, using card 0")
-            return "0"
+        # 3. Last resort: ask every card which one really has the control,
+        #    rather than assuming and muting something inaudible.
+        try:
+            with open('/proc/asound/cards') as f:
+                for line in f:
+                    m = re.match(r"\s*(\d+)\s+\[(\S+)\s*\]", line)
+                    if m and self._control_exists(m.group(2)):
+                        logger.warning(
+                            f"{STEREO_CARD_NAME} unavailable; using card "
+                            f"'{m.group(2)}' which does have a '{self.control_name}' control"
+                        )
+                        return m.group(2)
+        except OSError as e:
+            logger.error(f"Could not read /proc/asound/cards: {e}")
 
-        except Exception as e:
-            logger.error(f"Error detecting stereo card: {e}")
-            return "0"
+        logger.error(
+            f"No card exposes a '{self.control_name}' control — muting will not "
+            f"work, so music will bleed into recordings. Check /etc/asound.conf."
+        )
+        return STEREO_CARD_NAME
+
+    def _control_exists(self, card) -> bool:
+        """True if `control_name` exists on this card. Probing beats guessing:
+        the old code's assumption is precisely what broke muting."""
+        try:
+            r = subprocess.run(["amixer", "-c", str(card), "sget", self.control_name],
+                               capture_output=True, timeout=3)
+            return r.returncode == 0
+        except Exception:
+            return False
 
     def mute(self):
         """Mute the car stereo output (Spotify keeps playing)"""
