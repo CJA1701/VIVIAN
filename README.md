@@ -45,11 +45,6 @@ than every prototype along the way.
 
 ## Hardware
 
-This isn't a Pi with a USB mic taped under the dash — building and
-integrating the physical unit was most of the project. It's mounted in the
-center console, right behind the gear selector, facing the rear seats at a
-slight upward angle:
-
 ![VIVIAN unit installed in the Mustang](Photos/VIVIAN%20Outside%20Shot.png)
 
 **Enclosure.** Custom-designed and 3D-printed in four pieces (top, bottom,
@@ -76,7 +71,7 @@ other independently feeds a Netgear LM1200 cellular modem, so the car keeps
 a network connection (and VIVIAN keeps its Claude API access) through the
 same voltage dips that used to reboot everything.
 
-**Other peripherals**, also physically integrated into the console:
+**Other peripherals:**
 - Waveshare 1.9" touchscreen (ST7789V2 + CST816) for Spotify control
 - A VK-162 USB GPS receiver
 - A USB camera at the base of the windshield, facing rearward, for sentry
@@ -102,25 +97,6 @@ VIVIANMK18/            Main application (Python)
 VivianGlass/            Companion Google Glass app (Java)
 1.9inch_Touch_LCD_Pi/    Vendor driver for the touchscreen (see below)
 ```
-
-## Running it yourself
-
-This is tightly coupled to specific hardware (Pi 5, a particular USB audio
-setup, a car-mounted camera), so it isn't a drop-in install — but the shape
-is:
-
-1. `cd VIVIANMK18 && ./setup_mk18.sh` — installs dependencies, downloads the
-   Piper voice models.
-2. Copy `config.example.yaml` → `config.yaml` and `Sentry/sentry_config.example.yaml`
-   → `Sentry/sentry_config.yaml`, filling in your own Anthropic API key,
-   Spotify app credentials, and (optionally) OpenWeather/Google/Discord keys.
-   **Never commit the filled-in files** — they're gitignored for a reason.
-3. `python3 preflight.py` — checks the wake-word model, audio devices, and
-   config before you trust it with anything.
-4. `python3 main.py`, or install `vivian.service` to run it under systemd.
-
-To train your own wake word rather than reusing `models/hey_vivian.onnx`,
-see `docs/WAKEWORD_TRAINING.md`.
 
 ## Third-party code
 
