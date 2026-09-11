@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VIVIAN</string>
+    <string name="live_card_tag">vivian_hud</string>
+</resources>

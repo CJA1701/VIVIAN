@@ -1,0 +1,36 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.DS_Store
+
+# Secrets — copy .example.yaml to the real filename and fill in your own values
+config.yaml
+sentry_config.yaml
+.env
+
+# Personal data — never commit real faces, footage, or logs
+face_database/
+VIVIANMK18/Sentry/snapshots/
+VIVIANMK18/Sentry/recordings/
+vivian.log
+vivian_state.json
+vivian_memory.json
+vivian_facts.txt
+
+# Large model downloads (fetched by setup_mk18.sh) — the trained wake-word
+# model is the one exception, tracked because it took ~2.5h of GPU to train
+VIVIANMK18/models/*
+!VIVIANMK18/models/hey_vivian.onnx
+VIVIANMK18/voices/
+VIVIANMK18/piper/
+VIVIANMK18/Sentry/audio/
+
+# Android build artifacts / local SDK config
+VivianGlass/app/build/
+VivianGlass/build/
+VivianGlass/.gradle/
+VivianGlass/local.properties
+VivianGlass/*.keystore
+VivianGlass/*.jks
+**/google-services.json

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="com.google.android.glass.permission.DEVELOPMENT" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_vivian">
+
+        <meta-data
+            android:name="com.google.android.glass.TouchEnabledApplication"
+            android:value="true" />
+
+        <activity
+            android:name=".VivianLaunchActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/ic_vivian"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="com.google.android.glass.action.VOICE_TRIGGER" />
+                <category android:name="com.google.android.glass.category.DIRECTORY" />
+            </intent-filter>
+            <meta-data
+                android:name="com.google.android.glass.VoiceTrigger"
+                android:resource="@xml/voice_trigger" />
+        </activity>
+
+        <service
+            android:name=".VivianGlassService"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/ic_vivian"
+            android:label="@string/app_name" />
+
+        <activity
+            android:name=".MenuActivity"
+            android:enabled="true" />
+
+    </application>
+</manifest>
